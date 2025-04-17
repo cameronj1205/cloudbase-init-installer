@@ -10,7 +10,7 @@ jobs:
       max-parallel: 100
       matrix:
         cbsinit_repo: ['https://github.com/cameronj1205/cloudbase-init']
-        cbsinit_branch: ['main']
+        cbsinit_branch: ['decode_metadata']
 
     steps:
     - uses: actions/checkout@v4
