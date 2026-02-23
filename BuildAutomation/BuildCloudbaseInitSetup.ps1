@@ -1,6 +1,6 @@
 Param(
   [string]$platform = "x64",
-  [string]$pythonversion = "3.11_9",
+  [string]$pythonversion = "3.13_10",
   [string]$SignX509Thumbprint = $null,
   [string]$release = $null,
   # Cloudbase-Init repo details
@@ -88,8 +88,23 @@ try
     ExecRetry { PipInstall "wheel" -update $true }
     ExecRetry { PipInstall "setuptools" -update $true }
 
-    ExecRetry { PullInstall "requirements" "https://github.com/openstack/requirements" }
-    $upper_constraints_file = $(Resolve-Path ".\requirements\upper-constraints.txt").Path
+    if (Test-Path ".\requirements") {
+        Remove-Item -Recurse -Force ".\requirements"
+    }
+
+    mkdir ".\requirements"
+    $upper_constraints_path = ".\requirements\upper-constraints.txt"
+    $upper_constraints_file = Join-Path (Resolve-Path ".\requirements") "upper-constraints.txt"
+    try {
+        ExecRetry { DownloadFile "https://raw.githubusercontent.com/cloudbase/cloudbase-init/refs/heads/${CloudbaseInitRepoBranch}/upper-constraints.txt" $upper_constraints_file }
+    } catch {
+        ExecRetry { DownloadFile "https://raw.githubusercontent.com/openstack/requirements/refs/heads/master/upper-constraints.txt" $upper_constraints_file }
+    }
+
+    if (!(Test-Path $upper_constraints_file)) {
+      throw "${upper_constraints_file} does not exist"
+    }
+
     $env:PIP_CONSTRAINT = $upper_constraints_file
     $env:PIP_NO_BINARIES = "cloudbase-init"
 
