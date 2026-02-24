@@ -164,13 +164,62 @@ try
 
     $installer_sources_dir = join-path $cloudbaseInitInstallerDir "CloudbaseInitSetup"
 
+    # Dynamically detect Visual C++ CRT merge module path (VC140 for VS2015-2019, VC143 for VS2022)
+    $vcMsmVersion = "140"
+    $vcYear = "2019"
+    $msvcEdition = "Community"
+    $msmRedistDir = "${ENV:ProgramFiles(x86)}\Common Files\Merge Modules"
+    $vsRoot = $null
+    $foundMsm = $false
+
+    # Try to infer used Visual Studio version/toolset from current environment or script logic
+    # Prefer VC143 if VS2022, else VC140 as fallback
+    try {
+        # Detect if used version is VS2022
+        $vswherePath = "${ENV:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vswherePath) {
+            $vs2022Path = & $vswherePath -version "17.0" -products * -property installationPath -latest | Select-Object -First 1
+            if ($vs2022Path) {
+                $msvcEdition = "Community"
+                $vcRedistDir2022 = Join-Path $vs2022Path "VC\Redist\MSVC"
+                if (Test-Path $vcRedistDir2022) {
+                    $msvcDirs = Get-ChildItem $vcRedistDir2022 | Sort-Object Name -Descending
+                    foreach ($dir in $msvcDirs) {
+                        $mergeModulesPath = Join-Path $dir.FullName "MergeModules"
+                        if (Test-Path $mergeModulesPath) {
+                            $vcMsmVersion = "143"
+                            $msmRedistDir = $mergeModulesPath
+                            $vcYear = "2022"
+                            $foundMsm = $true
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    } catch {}
+
+    if (!$foundMsm) {
+        # Default to legacy 2019/2017 merge module location
+        $vcMsmVersion = "140"
+        $vcYear = "2019"
+        $msmRedistDir = "${ENV:ProgramFiles(x86)}\Common Files\Merge Modules"
+    }
+
     if($platform -eq "x64")
     {
-        copy "${VSRedistDir}\Microsoft_VC140_CRT_x64.msm" $installer_sources_dir
+        $crtMsm = "Microsoft_VC${vcMsmVersion}_CRT_x64.msm"
     }
     else
     {
-        copy "${VSRedistDir}\Microsoft_VC140_CRT_x86.msm" $installer_sources_dir
+        $crtMsm = "Microsoft_VC${vcMsmVersion}_CRT_x86.msm"
+    }
+    $crtMsmPath = Join-Path $msmRedistDir $crtMsm
+    if (Test-Path $crtMsmPath) {
+        copy $crtMsmPath $installer_sources_dir
+        Write-Host "Copied CRT merge module: $crtMsmPath"
+    } else {
+        Write-Warning "Could not find CRT merge module at: $crtMsmPath. Make sure the C++ merge modules are installed for Visual Studio $vcYear."
     }
 
     cd $cloudbaseInitInstallerDir
