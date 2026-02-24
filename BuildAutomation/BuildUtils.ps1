@@ -180,51 +180,74 @@ function PipInstall($package, $allow_dev=$false, $update=$false)
 
 function SetVCVars($version="2019", $platform="x86_amd64") {
     # Adds support for detection of Visual Studio 2022, 2019, 2017 Community or Enterprise editions.
+    # Now supports auto-fallback from "2019" to "2022" (and beyond as needed).
     # Optionally uses vswhere.exe for VS detection if present.
 
     $vsInstallTypes = @("Community", "Enterprise")
     $vsInstallBuildFolder = $null
     $vsInstallArchTypes = @()
+    $requestedVersion = $version
 
-    # For VS 2022, it only installs to ProgramFiles, not ProgramFiles (x86)
-    if ($version -eq "2022") {
-        $vsInstallArchTypes = @("$ENV:ProgramFiles")
+    # Allow fallback versions—try next available VS version if the requested one is not present
+    $possibleVersions = @()
+    if ($version -eq "2019") {
+        # By default, prefer 2019, then try 2022 as fallback
+        $possibleVersions = @("2019", "2022")
+    } elseif ($version -eq "2022") {
+        $possibleVersions = @("2022")
     } else {
-        $vsInstallArchTypes = @("$ENV:ProgramFiles (x86)", "$ENV:ProgramFiles")
+        $possibleVersions = @($version)
     }
 
-    foreach ($vsInstallArchType in $vsInstallArchTypes) {
-        foreach ($vsInstallType in $vsInstallTypes) {
-            $vsInstallBuildFolderCheck = "${vsInstallArchType}\Microsoft Visual Studio\$version\${vsInstallType}\VC\Auxiliary\Build"
-            if (Test-Path $vsInstallBuildFolderCheck) {
-                $vsInstallBuildFolder = $vsInstallBuildFolderCheck
-                break
-            } else {
-                Write-Host "${vsInstallBuildFolderCheck} does not exist"
+    foreach ($tryVersion in $possibleVersions) {
+        if ($tryVersion -eq "2022") {
+            $vsInstallArchTypes = @("$ENV:ProgramFiles")
+        } else {
+            $vsInstallArchTypes = @("$ENV:ProgramFiles (x86)", "$ENV:ProgramFiles")
+        }
+
+        foreach ($vsInstallArchType in $vsInstallArchTypes) {
+            foreach ($vsInstallType in $vsInstallTypes) {
+                $vsInstallBuildFolderCheck = "${vsInstallArchType}\Microsoft Visual Studio\$tryVersion\${vsInstallType}\VC\Auxiliary\Build"
+                if (Test-Path $vsInstallBuildFolderCheck) {
+                    $vsInstallBuildFolder = $vsInstallBuildFolderCheck
+                    $version = $tryVersion
+                    break
+                } else {
+                    Write-Host "${vsInstallBuildFolderCheck} does not exist"
+                }
             }
+            if ($vsInstallBuildFolder) { break }
         }
         if ($vsInstallBuildFolder) { break }
     }
+
     if ($vsInstallBuildFolder -eq $null) {
-        # Optionally, try vswhere.exe if present to auto-detect VS install for 2022+
+        # Optionally, try vswhere.exe if present to auto-detect VS install for latest available version
         $vswherePath = "${ENV:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         if (Test-Path $vswherePath) {
-            $vsInstallDir = & $vswherePath -version "[$version.0,$($version).999]" -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
-            if ($vsInstallDir) {
-                foreach ($vsInstallType in $vsInstallTypes) {
-                    $buildFolder = "$vsInstallDir\VC\Auxiliary\Build"
-                    if (Test-Path $buildFolder) {
-                        $vsInstallBuildFolder = $buildFolder
-                        break
+            # Try from newest version down (2022, 2019)
+            foreach ($ver in @("2022", "2019")) {
+                $vsInstallDir = & $vswherePath -version "[$ver.0,$($ver).999]" -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
+                if ($vsInstallDir) {
+                    foreach ($vsInstallType in $vsInstallTypes) {
+                        $buildFolder = "$vsInstallDir\VC\Auxiliary\Build"
+                        if (Test-Path $buildFolder) {
+                            $vsInstallBuildFolder = $buildFolder
+                            $version = $ver
+                            break
+                        }
                     }
                 }
+                if ($vsInstallBuildFolder) { break }
             }
         }
         if ($vsInstallBuildFolder -eq $null) {
-            throw "Visual Studio $version installation has not been found"
+            throw "Visual Studio $requestedVersion or a newer supported version installation has not been found"
         }
     }
 
+    Write-Host "Using Visual Studio version: $version at $vsInstallBuildFolder"
     pushd $vsInstallBuildFolder
     try {
         cmd /c "vcvarsall.bat $platform & set" |
