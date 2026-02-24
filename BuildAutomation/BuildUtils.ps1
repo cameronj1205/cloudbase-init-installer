@@ -174,7 +174,7 @@ function PipInstall($package, $allow_dev=$false, $update=$false)
         $u = "-U"
     }
 
-    python -m pip install --only-binary=:all: $dev $u $package
+    python -m pip install $dev $u $package
     if ($LastExitCode) { throw "pip install $dev failed on package: $package" }
 }
 
